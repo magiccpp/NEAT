@@ -88,12 +88,9 @@ class LSTMCreature(nn.Module):
                     param.add_(noise)
 
 
-class NEATTradingSystem:
-    """NEAT-based trading system with LSTM creatures"""
 
 class NEATTradingSystem:
     """NEAT-based trading system with LSTM creatures"""
-
     def __init__(self, commission_rate=0.001, max_population=100000, log_file="output.log"):
         self.commission_rate = commission_rate
         self.max_population = max_population
@@ -113,6 +110,9 @@ class NEATTradingSystem:
         # NEW: stable selected creature (model choice)
         self.selected_creature = None
         self.selected_rank = None
+        # NEW: real asset tracked for the chosen creature
+        self.asset = 1.0
+        self.asset_history = [self.asset]
 
     def update_selected_creature(self):
         """
@@ -128,7 +128,7 @@ class NEATTradingSystem:
 
         # Sort by energy (descending)
         sorted_pop = sorted(self.population, key=lambda c: c.energy, reverse=True)
-        top_n = max(1, int(len(sorted_pop) * 0.1))
+        top_n = max(1, int(len(sorted_pop) * 0.01))
         top_group = sorted_pop[:top_n]
 
         # If the existing selected creature is still in the top group, keep it
@@ -257,7 +257,11 @@ class NEATTradingSystem:
         ages = []
         creatures_to_remove = []
 
-        for creature, new_portfolio, new_energy, portfolio_log_return, age, alive in results:
+        # NEW: map creature -> today's portfolio_log_return
+        portfolio_return_map = {}
+
+        for creature, new_portfolio, new_energy, portfolio_log_return, age,  alive in results:
+            portfolio_return_map[creature] = portfolio_log_return
             creature.fitness_history.append(portfolio_log_return)
             if alive:
                 creature.energy = new_energy
@@ -322,6 +326,13 @@ class NEATTradingSystem:
                 f"Energy: {self.selected_creature.energy:.3f}, "
                 f"Age: {sel_age}, Rank: {rank_str}"
             )
+
+            # NEW: grow asset with the selected creature's portfolio return
+            sel_ret = portfolio_return_map.get(self.selected_creature)
+            if sel_ret is not None:
+                self.asset *= float(np.exp(sel_ret))   # no DAILY_COST here
+                self.asset_history.append(self.asset)
+                self.write_log(f"  Global Asset (selected creature): {self.asset:.6f}")
 
         # Reproduction every 128 steps (skip step 0)
         if self.current_step > 0 and self.current_step % 128 == 0:
@@ -452,6 +463,10 @@ class NEATTradingSystem:
 
         if end_day is None:
             end_day = len(self.stock_data) - 1  # inclusive
+
+        # NEW: reset asset for this run
+        self.asset = 1.0
+        self.asset_history = [self.asset]
 
         self.write_log(f"\nStarting simulation from day {start_day} to day {end_day}")
         self.write_log("=" * 80)

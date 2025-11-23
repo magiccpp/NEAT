@@ -459,7 +459,7 @@ def parse_args(argv=None):
     # Defaults
     max_population = 1000
     log_file = "output.log"
-    end_day = 10000
+    end_day = None
     input_file = "stock_data_vol.csv"
     try:
         # short options: -m, -l, -h
