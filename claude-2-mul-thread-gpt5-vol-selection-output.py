@@ -13,7 +13,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import gc
 # Optional: avoid oversubscription (important when you add threads)
 # try:
 #     torch.set_num_threads(1)
@@ -95,7 +95,10 @@ class NEATTradingSystem:
         self.commission_rate = commission_rate
         self.max_population = max_population
         self.population = []
-        self.dead_creatures = []
+
+        self.dead_count = 0
+        self.dead_meta = []     # lightweight records only
+
         self.current_step = 0
 
         # Data holders
@@ -116,6 +119,9 @@ class NEATTradingSystem:
 
         # NEW: records for CSV output: list of (date, cumulative_log_return)
         self.output_records = []
+        # NEW: incremental CSV writing
+        self.output_file = None
+        self._output_file_initialized = False
 
     def update_selected_creature(self):
         """
@@ -235,7 +241,7 @@ class NEATTradingSystem:
         # If nobody's alive, log and move on
         if not self.population:
             self.write_log(
-                f"Step {self.current_step}: Alive: 0, Died: 0, Total dead: {len(self.dead_creatures)}, "
+                f"Step {self.current_step}: Alive: 0, Died: 0, Total dead: {self.dead_count}, "
                 f"Avg Energy: 0.00, Max Energy: 0.00, Best ID: N/A (age: 0), Max Age: 0, Avg Age: 0.0"
             )
             # NEW: also clear selected creature when population is empty
@@ -280,7 +286,24 @@ class NEATTradingSystem:
         for creature in creatures_to_remove:
             if creature in self.population:
                 self.population.remove(creature)
-            self.dead_creatures.append(creature)
+            # record lightweight death metadata
+            self.dead_count += 1
+            self.dead_meta.append({
+                "id": creature.creature_id,
+                "birth_step": creature.birth_step,
+                "death_step": self.current_step,
+                "age": self.current_step - creature.birth_step,
+                "energy_at_death": float(getattr(creature, "energy", 0.0)),
+            })
+
+            # actively drop large refs (helps GC)
+            creature.hidden = None
+            creature.portfolio = None
+            creature.fitness_history = None
+            del creature
+
+        if self.current_step % 200 == 0:
+            gc.collect()
 
         # Compute stats
         if energies:
@@ -301,7 +324,7 @@ class NEATTradingSystem:
             best_age = 0
 
         dead_count = len(creatures_to_remove)
-        total_dead = len(self.dead_creatures)
+        total_dead = self.dead_count
 
         # NEW: update the stable selected creature based on top 10%
         self.update_selected_creature()
@@ -340,6 +363,7 @@ class NEATTradingSystem:
                 cum_log = float(np.log(self.asset))
                 # record (Date, TotalLogReturn)
                 self.output_records.append((current_date, sel_ret))
+                self._append_output_record(current_date, sel_ret)
                 self.write_log(f"  Global Asset (selected creature): {self.asset:.6f}")
 
         # Reproduction every 128 steps (skip step 0)
@@ -379,7 +403,6 @@ class NEATTradingSystem:
 
             for creature in bottom_creatures:
                 self.population.remove(creature)
-                self.dead_creatures.append(creature)
 
             self.write_log(f"Population after removal: {len(self.population)}")
 
@@ -459,7 +482,25 @@ class NEATTradingSystem:
 
         # Move culled creatures to dead list
         culled = self.population[self.max_population:]
-        self.dead_creatures.extend(culled)
+        for creature in culled:
+            self.dead_count += 1
+            self.dead_meta.append({
+                "id": creature.creature_id,
+                "birth_step": creature.birth_step,
+                "death_step": self.current_step,
+                "age": self.current_step - creature.birth_step,
+                "energy_at_death": float(getattr(creature, "energy", 0.0)),
+                "reason": "cull_to_max_population",
+            })
+            creature.hidden = None
+            creature.portfolio = None
+            creature.fitness_history = None
+            del creature
+
+        self.population = self.population[:self.max_population]
+
+        if self.current_step % 200 == 0:
+            gc.collect()
 
         self.population = self.population[:self.max_population]
 
@@ -476,6 +517,8 @@ class NEATTradingSystem:
         self.asset_history = [self.asset]
         self.output_records = []
 
+        # NEW: prepare output CSV for this run
+        self._init_output_csv()
         self.write_log(f"\nStarting simulation from day {start_day} to day {end_day}")
         self.write_log("=" * 80)
 
@@ -490,7 +533,7 @@ class NEATTradingSystem:
 
         self.write_log("\n=== SIMULATION COMPLETE ===")
         self.write_log(f"Final population: {len(self.population)}")
-        self.write_log(f"Total deaths: {len(self.dead_creatures)}")
+        self.write_log(f"Total deaths: {self.dead_count}")
 
         if self.population:
             energies = [c.energy for c in self.population]
@@ -556,6 +599,43 @@ class NEATTradingSystem:
 
         return creature, new_portfolio, new_energy, portfolio_log_return, age, alive
 
+    # NEW: initialize CSV file (called at start of run)
+    def _init_output_csv(self):
+        """
+        Prepare the CSV file for incremental logging.
+        If file exists, remove it and write header again.
+        """
+        if self.output_file is None:
+            return
+
+        # Reset state
+        self._output_file_initialized = False
+
+        # Remove old file if exists
+        if os.path.exists(self.output_file):
+            os.remove(self.output_file)
+
+        # Write header
+        with open(self.output_file, "w") as f:
+            f.write("Date,LogReturn\n")
+
+        self._output_file_initialized = True
+
+    # NEW: append a single (date, log_return) row
+    def _append_output_record(self, date, log_return):
+        """
+        Append one row to the CSV for the selected creature.
+        """
+        if self.output_file is None:
+            return
+
+        # Ensure header exists if something went wrong
+        if not self._output_file_initialized or not os.path.exists(self.output_file):
+            self._init_output_csv()
+
+        # date is a pandas Timestamp; use ISO format
+        with open(self.output_file, "a") as f:
+            f.write(f"{date.isoformat()},{log_return}\n")
 
 def parse_args(argv=None):
     if argv is None:
@@ -630,8 +710,18 @@ if __name__ == "__main__":
     print(f"Input file: {input_file}")
     print(f"Output file: {output_file}")
 
+    # if output file exists, remove it
+    if os.path.exists(output_file):
+        print("Removing existing output file:", output_file)
+        os.remove(output_file)
+
+    if os.path.exists(log_file):
+        print("Removing existing log file:", log_file)
+        os.remove(log_file)
+        
     system = NEATTradingSystem(commission_rate=0.001, max_population=max_population, log_file=log_file)
 
+    system.output_file = output_file
     # Load data (expects returns then volume log-diffs)
     system.load_data(input_file)
 
@@ -640,6 +730,3 @@ if __name__ == "__main__":
 
     # Run simulation (adjust end_day to your dataset length)
     system.run_simulation(start_day=0, end_day=end_day)
-
-    # NEW: save (Date, TotalLogReturn) to CSV for the selected creature
-    system.save_selected_log_returns(output_file)
