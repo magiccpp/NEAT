@@ -696,15 +696,17 @@ def parse_args(argv=None):
 
 # Main execution
 if __name__ == "__main__":
+    input_file_path = './input_files'
+    output_file_path = './output_files'
+    log_file_path = './log_files'
+
     max_population, log_file, input_file, end_day, output_file, _ = parse_args()
 
     # Derive default output file name if not given
-    if output_file is None:
-        if input_file.lower().endswith(".csv"):
-            base = input_file[:-4]
-            output_file = f"{base}_out.csv"
-        else:
-            output_file = input_file + "_out.csv"
+
+    input_file = f"{input_file_path}/{input_file}"
+    output_file = f"{output_file_path}/{output_file}"
+    log_file = f"{log_file_path}/{log_file}"
 
     print(f"Max Population: {max_population}, log file: {log_file}")
     print(f"Input file: {input_file}")
