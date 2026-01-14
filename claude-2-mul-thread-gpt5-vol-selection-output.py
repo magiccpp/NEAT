@@ -1,4 +1,5 @@
 import getopt
+from pathlib import Path
 import sys
 import numpy as np
 import pandas as pd
@@ -699,6 +700,10 @@ if __name__ == "__main__":
     input_file_path = './input_files'
     output_file_path = './output_files'
     log_file_path = './log_files'
+
+    # create output_file_path in the case it does not exist
+    Path(output_file_path).mkdir(parents=True, exist_ok=True)
+    Path(log_file_path).mkdir(parents=True, exist_ok=True)
 
     max_population, log_file, input_file, end_day, output_file, _ = parse_args()
 
