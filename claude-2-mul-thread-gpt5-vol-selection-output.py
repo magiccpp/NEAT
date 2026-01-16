@@ -36,7 +36,7 @@ DAILY_COST = 0
 class LSTMCreature(nn.Module):
     """LSTM-based creature for portfolio prediction"""
 
-    def __init__(self, input_size, num_stocks, hidden_size=64, num_layers=2, creature_id=None):
+    def __init__(self, input_size, num_stocks, hidden_size=64, num_layers=2, creature_id=None, long_only=False):
         super(LSTMCreature, self).__init__()
         self.creature_id = creature_id or random.randint(0, 100000)
         self.input_size = input_size              # = 2 * num_stocks
@@ -44,7 +44,7 @@ class LSTMCreature(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.output_size = num_stocks + 1         # stocks + cash
-
+        self.long_only = long_only
         # LSTM layers
         self.lstm = nn.LSTM(self.input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, self.output_size)
@@ -68,15 +68,18 @@ class LSTMCreature(nn.Module):
 
         out, self.hidden = self.lstm(x, self.hidden)
         out = self.fc(out[:, -1, :])  # Take last output
-
-        # Signed softmax trick:
-        signs = torch.tanh(out)                      # (-1, 1)
-        abs_weights = F.softmax(torch.abs(out), -1)  # sum(abs)=1 before renorm
-        portfolio = signs * abs_weights
-
-        # Normalize to ensure sum of absolute values = 1
-        portfolio = portfolio / torch.sum(torch.abs(portfolio), dim=-1, keepdim=True)
-        return portfolio
+        if self.long_only:
+            # standard non-negative portfolio weights that sum to 1
+            portfolio = F.softmax(out, dim=-1)
+            return portfolio
+        else:
+            # original “signed‐softmax” trick to allow shorting
+            signs = torch.tanh(out)                      # in (-1,1)
+            abs_weights = F.softmax(torch.abs(out), dim=-1)
+            portfolio = signs * abs_weights
+            # normalize so sum of abs weights = 1
+            portfolio = portfolio.div(portfolio.abs().sum(dim=-1, keepdim=True))
+            return portfolio
 
     def reset_hidden(self):
         self.hidden = None
@@ -92,7 +95,7 @@ class LSTMCreature(nn.Module):
 
 class NEATTradingSystem:
     """NEAT-based trading system with LSTM creatures"""
-    def __init__(self, commission_rate=0.001, max_population=100000, log_file="output.log"):
+    def __init__(self, commission_rate=0.001, max_population=100000, log_file="output.log", long_only=False):
         self.commission_rate = commission_rate
         self.max_population = max_population
         self.population = []
@@ -110,6 +113,7 @@ class NEATTradingSystem:
         self.input_size = None
 
         self.log_file = log_file
+        self.long_only = long_only
 
         # NEW: stable selected creature (model choice)
         self.selected_creature = None
@@ -199,7 +203,8 @@ class NEATTradingSystem:
                 input_size=self.input_size,
                 num_stocks=self.num_stocks,
                 hidden_size=64,
-                num_layers=2
+                num_layers=2,
+                long_only=self.long_only
             )
             creature.birth_step = self.current_step
             self.population.append(creature)
@@ -461,7 +466,8 @@ class NEATTradingSystem:
             input_size=self.input_size,
             num_stocks=self.num_stocks,
             hidden_size=64,
-            num_layers=2
+            num_layers=2,
+            long_only=self.long_only
         )
 
         # Crossover weights
@@ -648,14 +654,14 @@ def parse_args(argv=None):
     end_day = None
     input_file = "stock_data_vol.csv"
     output_file = None  # NEW: default, derived from input_file if not provided
-
+    long_only = False
     try:
         # short options: -m, -l, -i, -e, -o, -h
         # long options require '=' when they take a value
         opts, args = getopt.getopt(
             argv,
-            "m:l:i:e:o:h",
-            ["max-population=", "log-file=", "input-file=", "end-day=", "output-file=", "help"]
+            "m:l:i:e:o:L:h",
+            ["max-population=", "log-file=", "input-file=", "end-day=", "output-file=", "long-only=","help"]
         )
     except getopt.GetoptError as e:
         print(f"Error: {e}")
@@ -664,6 +670,7 @@ def parse_args(argv=None):
               "[-i FILE | --input-file FILE] "
               "[-e N | --end-day N] "
               "[-o FILE | --output-file FILE]")
+              "[-L long_only | --long-only long_only]")
         sys.exit(2)
 
     for opt, arg in opts:
@@ -673,6 +680,7 @@ def parse_args(argv=None):
                   "[-i FILE | --input-file FILE] "
                   "[-e N | --end-day N] "
                   "[-o FILE | --output-file FILE]")
+                  "[-L long_only | --long-only long_only]")
             sys.exit(0)
         elif opt in ("-m", "--max-population"):
             try:
@@ -691,8 +699,10 @@ def parse_args(argv=None):
             end_day = int(arg)
         elif opt in ("-o", "--output-file"):
             output_file = arg
+        elif opt in ("-L", "--long-only"):
+            long_only = True
 
-    return max_population, log_file, input_file, end_day, output_file, args  # args = leftover positional args, if any
+    return max_population, log_file, input_file, end_day, output_file, long_only, args  # args = leftover positional args, if any
 
 
 # Main execution
@@ -705,7 +715,7 @@ if __name__ == "__main__":
     Path(output_file_path).mkdir(parents=True, exist_ok=True)
     Path(log_file_path).mkdir(parents=True, exist_ok=True)
 
-    max_population, log_file, input_file, end_day, output_file, _ = parse_args()
+    max_population, log_file, input_file, end_day, output_file, long_only, _ = parse_args()
 
     # Derive default output file name if not given
 
@@ -726,7 +736,7 @@ if __name__ == "__main__":
         print("Removing existing log file:", log_file)
         os.remove(log_file)
         
-    system = NEATTradingSystem(commission_rate=0.001, max_population=max_population, log_file=log_file)
+    system = NEATTradingSystem(commission_rate=0.001, max_population=max_population, log_file=log_file,long_only=long_only)
 
     system.output_file = output_file
     # Load data (expects returns then volume log-diffs)
