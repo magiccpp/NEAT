@@ -1,0 +1,5 @@
+# find out the returns of the last 1000 days.
+for i in `ls -1`; do echo $i; tail -1000 $i|awk -F, '{ sum += $2 } END { print sum }'; done
+
+
+
