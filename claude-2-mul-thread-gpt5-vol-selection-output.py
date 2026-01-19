@@ -660,8 +660,8 @@ def parse_args(argv=None):
         # long options require '=' when they take a value
         opts, args = getopt.getopt(
             argv,
-            "m:l:i:e:o:L:h",
-            ["max-population=", "log-file=", "input-file=", "end-day=", "output-file=", "long-only=","help"]
+            "m:l:i:e:o:Lh",
+            ["max-population=", "log-file=", "input-file=", "end-day=", "output-file=", "long-only", "help"]
         )
     except getopt.GetoptError as e:
         print(f"Error: {e}")
@@ -669,8 +669,8 @@ def parse_args(argv=None):
               "[-l FILE | --log-file FILE] "
               "[-i FILE | --input-file FILE] "
               "[-e N | --end-day N] "
-              "[-o FILE | --output-file FILE]")
-              "[-L long_only | --long-only long_only]")
+              "[-o FILE | --output-file FILE]"
+              "[-L long_only]")
         sys.exit(2)
 
     for opt, arg in opts:
@@ -679,8 +679,8 @@ def parse_args(argv=None):
                   "[-l FILE | --log-file FILE] "
                   "[-i FILE | --input-file FILE] "
                   "[-e N | --end-day N] "
-                  "[-o FILE | --output-file FILE]")
-                  "[-L long_only | --long-only long_only]")
+                  "[-o FILE | --output-file FILE]"
+                  "[-L long_only]")
             sys.exit(0)
         elif opt in ("-m", "--max-population"):
             try:
@@ -736,7 +736,7 @@ if __name__ == "__main__":
         print("Removing existing log file:", log_file)
         os.remove(log_file)
         
-    system = NEATTradingSystem(commission_rate=0.001, max_population=max_population, log_file=log_file,long_only=long_only)
+    system = NEATTradingSystem(commission_rate=0.001, max_population=max_population, log_file=log_file, long_only=long_only)
 
     system.output_file = output_file
     # Load data (expects returns then volume log-diffs)
