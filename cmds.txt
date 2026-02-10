@@ -3,3 +3,10 @@ for i in `ls -1`; do echo $i; tail -1000 $i|awk -F, '{ sum += $2 } END { print s
 
 
 
+python3 claude-2-mul-thread-gpt5-vol-selection-output-ckpoint.py --max-population=2000 \
+--log-file=data_vol-cluster-0-startdate-1962-01-03.log  \
+--input-file=data_vol-cluster-0-startdate-1962-01-03.csv  \
+--output-file=data_vol-cluster-0-startdate-1962-01-03.out.csv \
+--json-output-dir=./json-output \
+--checkpoint-dir=checkpoints-startdate-1962-01-03 \
+--reload --long-only
