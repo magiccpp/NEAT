@@ -10,3 +10,15 @@ python3 claude-2-mul-thread-gpt5-vol-selection-output-ckpoint.py --max-populatio
 --json-output-dir=./json-output \
 --checkpoint-dir=checkpoints-startdate-1962-01-03 \
 --reload --long-only
+
+
+
+python3 claude-2-mul-thread-gpt5-vol-selection-output-ckpoint-margin-call.py --max-population=4000 \
+--log-file=data_vol-cluster-0-long-margin-startdate-1962-01-03.log  \
+--input-file=data_vol-cluster-0-startdate-1962-01-03.csv  \
+--output-file=data_vol-cluster-0-long-margin-startdate-1962-01-03.out.csv \
+--json-output-dir=./json-output-long-margin \
+--checkpoint-dir=checkpoints-startdate-1962-01-03-long-margin \
+--reload --long-only \
+--enable-leverage \
+--max-leverage=10
